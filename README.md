@@ -6,6 +6,9 @@ Automatic APT (automatic-APT) is a program that runs in your AWS environment to 
 ## Usage
 Run `go run main.go` after configuring your AWS credentials on the command-line. Then, navigate to localhost:3000. It will list and describe all of the security groups you have configured on your EC2 instances.
 
+## Command-line Options
+- `go run main.go just-instances` will show just the instance IDs and names -- no security group details.
+
 ## Roadmap (Hopefully)
 - API Sec capabilities
 - K8s capabilities
