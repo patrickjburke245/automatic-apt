@@ -4,11 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+
+	chi "github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 type Ec2Instance struct {
@@ -57,26 +62,60 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Create "database" (it's just a file as of Feb 25th, 2025)
+	file, err := os.Create("output.txt")
+	if err != nil {
+		fmt.Println("Error creating file:", err)
+		return
+	}
+	defer file.Close()
+
 	// Print results
 	for _, instance := range instances {
-		fmt.Printf("Instance ID: %s\n", instance.ID)
+		fmt.Fprintf(file, "Instance ID: %s\n", instance.ID)
 		if instance.Name != "" {
-			fmt.Printf("Name: %s\n", instance.Name)
+			fmt.Fprintf(file, "Name: %s\n", instance.Name)
 		}
 		if instance.PublicIP != "" {
-			fmt.Printf("Public IP: %s\n", instance.PublicIP)
+			fmt.Fprintf(file, "Public IP: %s\n", instance.PublicIP)
 		}
 
-		fmt.Println("Security Groups:")
+		fmt.Fprintln(file, "Security Groups:")
 		for _, sg := range instance.SecurityGroups {
-			fmt.Printf("  Security Group: %s (%s)\n", sg.Name, sg.ID)
+			fmt.Fprintf(file, "  Security Group: %s (%s)\n", sg.Name, sg.ID)
 			for _, port := range sg.PortsAccessible {
-				fmt.Printf("    Port %d (%s):\n", port.Port, port.Protocol)
-				fmt.Printf("      Inbound access allowed from: %v\n", port.SourceRanges)
+				fmt.Fprintf(file, "    Port %d (%s):\n", port.Port, port.Protocol)
+				fmt.Fprintf(file, "      Inbound access allowed from: %v\n", port.SourceRanges)
 			}
 		}
 		fmt.Println()
 	}
+
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	// Read the file content
+	byteArray, err := os.ReadFile("output.txt")
+	if err != nil {
+		fmt.Println("Error reading file:", err)
+		return
+	}
+
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		// Set the content type to text/html
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+		// Write a proper HTML response with formatting
+		fmt.Fprintf(w, "<html><head><title>Automatic APT Results</title>")
+		fmt.Fprintf(w, "<style>body{font-family:monospace;white-space:pre;padding:20px;line-height:1.5}</style>")
+		fmt.Fprintf(w, "</head><body>")
+
+		// Write the content with HTML encoding
+		fmt.Fprintf(w, "%s", string(byteArray))
+
+		fmt.Fprintf(w, "</body></html>")
+	})
+
+	http.ListenAndServe(":3000", r)
 }
 
 // load config
