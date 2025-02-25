@@ -36,6 +36,13 @@ type PortAccessible struct {
 }
 
 func main() {
+	args := os.Args
+	fmt.Println("All arguments:", args)
+	fmt.Println("Program name:", args[0])
+	if len(args) > 1 {
+		fmt.Println("First argument:", args[1])
+	}
+
 	//This is my setup monologue. This app is a film. It's a production.
 	fmt.Println("Hello! This is the Automatic APT™.")
 	fmt.Println("You are running me in order to hack your own services.")
@@ -71,24 +78,35 @@ func main() {
 	defer file.Close()
 
 	// Print results
-	for _, instance := range instances {
-		fmt.Fprintf(file, "Instance ID: %s\n", instance.ID)
-		if instance.Name != "" {
-			fmt.Fprintf(file, "Name: %s\n", instance.Name)
-		}
-		if instance.PublicIP != "" {
-			fmt.Fprintf(file, "Public IP: %s\n", instance.PublicIP)
-		}
-
-		fmt.Fprintln(file, "Security Groups:")
-		for _, sg := range instance.SecurityGroups {
-			fmt.Fprintf(file, "  Security Group: %s (%s)\n", sg.Name, sg.ID)
-			for _, port := range sg.PortsAccessible {
-				fmt.Fprintf(file, "    Port %d (%s):\n", port.Port, port.Protocol)
-				fmt.Fprintf(file, "      Inbound access allowed from: %v\n", port.SourceRanges)
+	if args[1] == "just-instances" {
+		for _, instance := range instances {
+			fmt.Fprintf(file, "Instance ID: %s\n", instance.ID)
+			if instance.Name != "" {
+				fmt.Fprintf(file, "Name: %s\n", instance.Name)
+			} else {
+				fmt.Fprintf(file, "Name: N/A\n")
 			}
 		}
-		fmt.Println()
+	} else {
+		for _, instance := range instances {
+			fmt.Fprintf(file, "Instance ID: %s\n", instance.ID)
+			if instance.Name != "" {
+				fmt.Fprintf(file, "Name: %s\n", instance.Name)
+			}
+			if instance.PublicIP != "" {
+				fmt.Fprintf(file, "Public IP: %s\n", instance.PublicIP)
+			}
+
+			fmt.Fprintln(file, "Security Groups:")
+			for _, sg := range instance.SecurityGroups {
+				fmt.Fprintf(file, "  Security Group: %s (%s)\n", sg.Name, sg.ID)
+				for _, port := range sg.PortsAccessible {
+					fmt.Fprintf(file, "    Port %d (%s):\n", port.Port, port.Protocol)
+					fmt.Fprintf(file, "      Inbound access allowed from: %v\n", port.SourceRanges)
+				}
+			}
+			fmt.Println()
+		}
 	}
 
 	r := chi.NewRouter()
@@ -111,7 +129,6 @@ func main() {
 
 		// Write the content with HTML encoding
 		fmt.Fprintf(w, "%s", string(byteArray))
-
 		fmt.Fprintf(w, "</body></html>")
 	})
 
