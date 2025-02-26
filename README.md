@@ -3,6 +3,9 @@ NIST [defines](https://csrc.nist.gov/glossary/term/advanced_persistent_threat) a
 
 Automatic APT (automatic-APT) is a program that runs in your AWS environment to tell you your biggest exposure risks and vulnerabilities.
 
+## Capabilities
+This app lists your RDS databases.
+
 ## Usage
 Run `go run main.go` after configuring your AWS credentials on the command-line. Then, navigate to localhost:3000. It will list and describe all of the security groups you have configured on your EC2 instances.
 

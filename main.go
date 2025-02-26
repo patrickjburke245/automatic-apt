@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	chi "github.com/go-chi/chi/v5"
@@ -68,7 +69,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	// Create "database" (it's just a file as of Feb 25th, 2025)
 	file, err := os.Create("output.txt")
 	if err != nil {
@@ -77,7 +77,37 @@ func main() {
 	}
 	defer file.Close()
 
-	// Print results
+	// Analyze RDS databases
+	fmt.Printf("Analyzing RDS databases for AWS Account: %s\n\n", *result.Account)
+	rdsClient := newRDSClient(ctx)
+	databases, err := rdsClient.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Fprintf(file, "RDS Start\n")
+
+	fmt.Fprintf(file, "Found %d RDS instances\n", len(databases.DBInstances))
+
+	for _, db := range databases.DBInstances {
+		var databaseName string
+
+		// Check if DBName is nil before dereferencing
+		if db.DBName != nil {
+			databaseName = *db.DBName
+		} else {
+			// Use DBInstanceIdentifier as fallback or indicate no DB name
+			databaseName = *db.DBInstanceIdentifier + " (no DB name)"
+			// Or simply: databaseName = "No DB name set"
+		}
+
+		fmt.Fprintf(file, databaseName+"\n") // Add newline for readability
+	}
+
+	fmt.Fprintf(file, "RDS End\n")
+
+	// Print instance results
+	fmt.Fprintf(file, "Instance Report!\n")
 	if len(args) > 1 && args[1] == "just-instances" {
 		for _, instance := range instances {
 			fmt.Fprintf(file, "Instance ID: %s\n", instance.ID)
@@ -108,6 +138,7 @@ func main() {
 			fmt.Println()
 		}
 	}
+	fmt.Fprintf(file, "----------\n")
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -135,7 +166,6 @@ func main() {
 	http.ListenAndServe(":3000", r)
 }
 
-// load config
 func newSTSClient(ctx context.Context) *sts.Client {
 	// Load AWS configuration
 	cfg, err := config.LoadDefaultConfig(ctx)
@@ -153,6 +183,14 @@ func newEC2Client(ctx context.Context) *ec2.Client {
 		log.Fatal(err)
 	}
 	return ec2.NewFromConfig(cfg)
+}
+
+func newRDSClient(ctx context.Context) *rds.Client {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return rds.NewFromConfig(cfg)
 }
 
 func analyzeEc2Instances(ctx context.Context, ec2Client *ec2.Client) ([]Ec2Instance, error) {
