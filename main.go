@@ -78,7 +78,7 @@ func main() {
 	defer file.Close()
 
 	// Print results
-	if args[1] == "just-instances" {
+	if len(args) > 1 && args[1] == "just-instances" {
 		for _, instance := range instances {
 			fmt.Fprintf(file, "Instance ID: %s\n", instance.ID)
 			if instance.Name != "" {
