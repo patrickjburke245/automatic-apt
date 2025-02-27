@@ -6,11 +6,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
+	rds_types "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	chi "github.com/go-chi/chi/v5"
@@ -77,31 +79,44 @@ func main() {
 	}
 	defer file.Close()
 
-	// Analyze RDS databases
-	fmt.Printf("Analyzing RDS databases for AWS Account: %s\n\n", *result.Account)
-	rdsClient := newRDSClient(ctx)
-	databases, err := rdsClient.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{})
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Scan for RDS instances across all regions
+	fmt.Printf("Analyzing RDS databases across multiple regions for AWS Account: %s\n\n", *result.Account)
+	databaseInstances := scanRDSInstancesAcrossRegions(ctx)
 
 	fmt.Fprintf(file, "RDS Start\n")
 
-	fmt.Fprintf(file, "Found %d RDS instances\n", len(databases.DBInstances))
-
-	for _, db := range databases.DBInstances {
-		var databaseName string
-
-		// Check if DBName is nil before dereferencing
-		if db.DBName != nil {
-			databaseName = *db.DBName
-		} else {
-			// Use DBInstanceIdentifier as fallback or indicate no DB name
-			databaseName = *db.DBInstanceIdentifier + " (no DB name)"
-			// Or simply: databaseName = "No DB name set"
+	// Print all RDS instances found
+	for region, instances := range databaseInstances {
+		fmt.Fprintf(file, "Region: %s\n", region)
+		if len(instances) == 0 {
+			fmt.Fprintf(file, "  No RDS instances found\n")
+			continue
 		}
 
-		fmt.Fprintf(file, databaseName+"\n") // Add newline for readability
+		for _, db := range instances {
+			var databaseInfo string
+
+			// Build the database information string
+			if db.DBName != nil {
+				databaseInfo = fmt.Sprintf("  DB: %s", *db.DBName)
+			} else if db.DBInstanceIdentifier != nil {
+				databaseInfo = fmt.Sprintf("  Instance: %s (no DB name)", *db.DBInstanceIdentifier)
+			} else {
+				databaseInfo = "  Unknown database"
+			}
+
+			// Add engine information if available
+			if db.Engine != nil {
+				databaseInfo += fmt.Sprintf(", Engine: %s", *db.Engine)
+			}
+
+			// Add status information if available
+			if db.DBInstanceStatus != nil {
+				databaseInfo += fmt.Sprintf(", Status: %s", *db.DBInstanceStatus)
+			}
+
+			fmt.Fprintf(file, "%s\n", databaseInfo)
+		}
 	}
 
 	fmt.Fprintf(file, "RDS End\n")
@@ -135,7 +150,6 @@ func main() {
 					fmt.Fprintf(file, "      Inbound access allowed from: %v\n", port.SourceRanges)
 				}
 			}
-			fmt.Println()
 		}
 	}
 	fmt.Fprintf(file, "----------\n")
@@ -298,4 +312,67 @@ func analyzeSecurityGroup(sg types.SecurityGroup) SecurityGroups {
 	}
 
 	return access
+}
+
+// scanRDSInstancesAcrossRegions scans for RDS instances across all specified regions
+func scanRDSInstancesAcrossRegions(ctx context.Context) map[string][]rds_types.DBInstance {
+	var wg sync.WaitGroup
+	var mutex sync.Mutex
+	results := make(map[string][]rds_types.DBInstance)
+
+	// Define regions to scan
+	var awsRegions = []string{
+		"us-east-1", "us-east-2", "us-west-1", "us-west-2",
+		"eu-west-1", "eu-central-1", "ap-northeast-1", "ap-southeast-1",
+		// Add more regions as needed
+	}
+
+	// Scan each region in parallel
+	for _, region := range awsRegions {
+		wg.Add(1)
+		go func(region string) {
+			defer wg.Done()
+
+			fmt.Printf("Scanning region %s for RDS instances...\n", region)
+			instances, err := scanRDSInstancesInRegion(ctx, region)
+
+			if err != nil {
+				fmt.Printf("Error scanning region %s: %v\n", region, err)
+				return
+			}
+
+			mutex.Lock()
+			results[region] = instances
+			mutex.Unlock()
+
+			fmt.Printf("Found %d RDS instances in region %s\n", len(instances), region)
+		}(region)
+	}
+
+	wg.Wait()
+	return results
+}
+
+// scanRDSInstancesInRegion scans for RDS instances in a specific region
+func scanRDSInstancesInRegion(ctx context.Context, region string) ([]rds_types.DBInstance, error) {
+	// Create RDS client for the specific region
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config for region %s: %w", region, err)
+	}
+
+	rdsClient := rds.NewFromConfig(cfg)
+
+	// Get RDS instances
+	databases, err := rdsClient.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{})
+	if err != nil {
+		// Don't treat access denied errors as fatal, just return empty results
+		if err.Error() == "AccessDenied" || err.Error() == "UnauthorizedOperation" {
+			fmt.Printf("Access denied for RDS in region %s. Skipping...\n", region)
+			return []rds_types.DBInstance{}, nil
+		}
+		return nil, fmt.Errorf("failed to describe DB instances in region %s: %w", region, err)
+	}
+
+	return databases.DBInstances, nil
 }
